@@ -4,7 +4,7 @@ from flask import Flask
 import telebot
 import yt_dlp
 
-TOKEN = "8853016629:AAGy6jB_-q5XO3omOA4ftd7lrN89e1G-a50"
+TOKEN = "8853016629:AAGuTwaErlD9vqE96tfuFeKmigT1SyxLU6Q"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
@@ -23,6 +23,17 @@ def run_web():
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "Привет! Пришли мне ссылку на видео, и я попробую его скачать.")
+    
+    try:
+        user_info = (
+            f"👤 Новый пользователь в боте!\n"
+            f"Имя: {message.from_user.first_name}\n"
+            f"Username: @{message.from_user.username or 'нет'}\n"
+            f"ID: {message.from_user.id}"
+        )
+        bot.send_message(ADMIN_ID, user_info)
+    except Exception as e:
+        print(f"Ошибка отправки админу: {e}")
 
 @bot.message_handler(commands=['status'])
 def status(message):
@@ -72,7 +83,6 @@ def download_video(message):
             os.remove('video.mp4')
 
 if __name__ == "__main__":
-    # Запускаем веб-сервер в фоновом потоке
     t = threading.Thread(target=run_web)
     t.start()
     
