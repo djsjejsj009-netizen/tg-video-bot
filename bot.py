@@ -5,7 +5,7 @@ from flask import Flask
 import telebot
 import yt_dlp
 
-TOKEN = "8853016629:AAGuTwaErlD9vqE96tfuFeKmigT1SyxLU6Q"
+TOKEN = "8853016629:AAHZ2sXg5jHuynIcbskyMHFB9q6LNiAX41g"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
