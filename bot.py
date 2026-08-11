@@ -1,11 +1,24 @@
+import os
+import threading
+from flask import Flask
 import telebot
 import yt_dlp
-import os
 
 TOKEN = "8853016629:AAGy6jB_-q5XO3omOA4ftd7lrN89e1G-a50"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
+
+# Создаем простой веб-сервер для Render
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -59,6 +72,9 @@ def download_video(message):
             os.remove('video.mp4')
 
 if __name__ == "__main__":
+    # Запускаем веб-сервер в фоновом потоке
+    t = threading.Thread(target=run_web)
+    t.start()
+    
     print("Бот запущен!")
     bot.polling(none_stop=True, interval=1)
-
