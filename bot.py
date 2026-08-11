@@ -27,10 +27,10 @@ def save_data(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f)
 
-# --- Веб-сервер против засыпания ---
+# --- Веб-сервер для UptimeRobot (убирает ошибку 404) ---
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is running!", 200
 
 def run_web():
     port = int(os.environ.get('PORT', 10000))
