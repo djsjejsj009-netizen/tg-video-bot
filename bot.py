@@ -7,7 +7,7 @@ import yt_dlp
 from flask import Flask
 
 # Настройки бота и администратора
-TOKEN = "ТВОЙ_ТОКЕН_БОТА"
+TOKEN = "8853016629:AAHZ2sXg5jHuynIcbskyMHFB9q6LNiAX41g"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
