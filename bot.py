@@ -1,197 +1,257 @@
 import os
-import threading
 import json
-from flask import Flask
+import threading
 import telebot
+from telebot import types
 import yt_dlp
+from flask import Flask
 
+# Настройки бота и администратора
 TOKEN = "8853016629:AAHZ2sXg5jHuynIcbskyMHFB9q6LNiAX41g"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
 
-# --- Работа с базой пользователей ---
-DATA_FILE = 'users.json'
-
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {"users": [], "banned": []}
-    try:
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {"users": [], "banned": []}
-
-def save_data(data):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f)
-
-# --- Веб-сервер для UptimeRobot (убирает ошибку 404) ---
 @app.route('/')
 def home():
-    return "Bot is running!", 200
+    return "Bot is running 24/7!"
 
-def run_web():
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
-# --- Команды для пользователей ---
+# Базы данных в JSON
+USERS_FILE = 'users.json'
+BANNED_FILE = 'banned.json'
+
+def load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as f:
+            try:
+                return json.load(f)
+            except:
+                return []
+    return []
+
+def save_json(filename, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+def add_user(user_id):
+    users = load_json(USERS_FILE)
+    if user_id not in users:
+        users.append(user_id)
+        save_json(USERS_FILE, users)
+
+def is_banned(user_id):
+    banned = load_json(BANNED_FILE)
+    return user_id in banned
+
+# Временное хранение ссылок пользователей
+user_links = {}
+
 @bot.message_handler(commands=['start'])
-def start(message):
-    data = load_data()
-    user_id = message.chat.id
-    
-    if user_id in data["banned"]:
-        bot.reply_to(message, "🚫 Доступ к боту ограничен.")
+def cmd_start(message):
+    user_id = message.from_user.id
+    if is_banned(user_id):
+        bot.reply_to(message, "🚫 Вы заблокированы в этом боте.")
         return
-        
-    if user_id not in data["users"] and user_id != ADMIN_ID:
-        data["users"].append(user_id)
-        save_data(data)
-        try:
-            user_info = (
-                f"👤 Новый пользователь!\n"
-                f"Имя: {message.from_user.first_name}\n"
-                f"Username: @{message.from_user.username or 'нет'}\n"
-                f"ID: {user_id}"
-            )
-            bot.send_message(ADMIN_ID, user_info)
-        except:
-            pass
-
-    bot.reply_to(message, "Привет! Пришли мне ссылку на видео, и я попробую его скачать. 🎥")
-
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    bot.reply_to(message, "ℹ️ Просто отправь мне ссылку на видео, и я скачаю его для тебя.")
-
-# --- Административные команды ---
-@bot.message_handler(commands=['status'])
-def status(message):
-    if message.chat.id == ADMIN_ID:
-        bot.reply_to(message, "✅ Бот работает стабильно!")
+    
+    add_user(user_id)
+    
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📢 Наш канал", url="https://t.me/tвой_канал"))
+    
+    bot.send_message(
+        message.chat.id,
+        "👋 Привет! Я твой супер-бот для скачивания медиа.\n\n"
+        "📥 Отправь мне ссылку на видео (TikTok, YouTube, Instagram и др.), "
+        "и я предложу выбрать формат (Видео HD или аудио MP3)!",
+        reply_markup=markup
+    )
 
 @bot.message_handler(commands=['stats'])
-def get_stats(message):
-    if message.chat.id != ADMIN_ID:
+def cmd_stats(message):
+    if message.from_user.id != ADMIN_ID:
         return
-    data = load_data()
-    count = len(data["users"])
-    banned_count = len(data["banned"])
-    bot.reply_to(message, f"📊 Статистика бота:\n👥 Пользователей в базе: {count}\n🚫 Заблокировано: {banned_count}")
+    users = load_json(USERS_FILE)
+    banned = load_json(BANNED_FILE)
+    bot.reply_to(
+        message,
+        f"📊 **Статистика бота:**\n\n"
+        f"👥 Всего пользователей: {len(users)}\n"
+        f"🚫 Заблокировано: {len(banned)}",
+        parse_mode="Markdown"
+    )
 
 @bot.message_handler(commands=['ban'])
-def ban_user(message):
-    if message.chat.id != ADMIN_ID:
+def cmd_ban(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        bot.reply_to(message, "⚠️ Укажи ID. Пример: `/ban 123456789`", parse_mode="Markdown")
         return
     try:
-        target_id = int(message.text.split()[1])
-        data = load_data()
-        if target_id not in data["banned"]:
-            data["banned"].append(target_id)
-            save_data(data)
-            bot.reply_to(message, f"✅ Пользователь {target_id} заблокирован.")
-        else:
-            bot.reply_to(message, "⚠️ Пользователь уже находится в бане.")
-    except IndexError:
-        bot.reply_to(message, "❌ Укажи ID. Пример: /ban 123456789")
+        target_id = int(args[1])
+        banned = load_json(BANNED_FILE)
+        if target_id not in banned:
+            banned.append(target_id)
+            save_json(BANNED_FILE, banned)
+        bot.reply_to(message, f"✅ Пользователь `{target_id}` заблокирован.", parse_mode="Markdown")
     except ValueError:
-        bot.reply_to(message, "❌ Неверный формат ID.")
+        bot.reply_to(message, "❌ Неверный ID.")
 
 @bot.message_handler(commands=['unban'])
-def unban_user(message):
-    if message.chat.id != ADMIN_ID:
+def cmd_unban(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) < 2:
+        bot.reply_to(message, "⚠️ Укажи ID. Пример: `/unban 123456789`", parse_mode="Markdown")
         return
     try:
-        target_id = int(message.text.split()[1])
-        data = load_data()
-        if target_id in data["banned"]:
-            data["banned"].remove(target_id)
-            save_data(data)
-            bot.reply_to(message, f"✅ Пользователь {target_id} разблокирован.")
-        else:
-            bot.reply_to(message, "❌ Этот пользователь не найден в черном списке.")
-    except IndexError:
-        bot.reply_to(message, "❌ Укажи ID. Пример: /unban 123456789")
+        target_id = int(args[1])
+        banned = load_json(BANNED_FILE)
+        if target_id in banned:
+            banned.remove(target_id)
+            save_json(BANNED_FILE, banned)
+        bot.reply_to(message, f"✅ Пользователь `{target_id}` разблокирован.", parse_mode="Markdown")
     except ValueError:
-        bot.reply_to(message, "❌ Неверный формат ID.")
+        bot.reply_to(message, "❌ Неверный ID.")
 
 @bot.message_handler(commands=['broadcast'])
-def broadcast(message):
-    if message.chat.id != ADMIN_ID:
+def cmd_broadcast(message):
+    if message.from_user.id != ADMIN_ID:
         return
     text = message.text.replace('/broadcast', '').strip()
     if not text:
-        bot.reply_to(message, "❌ Напиши текст для рассылки после команды /broadcast")
+        bot.reply_to(message, "⚠️ Напиши текст для рассылки после команды.")
         return
     
-    data = load_data()
+    users = load_json(USERS_FILE)
     success = 0
-    blocked = 0
+    failed = 0
     
-    for uid in data["users"]:
+    status_msg = bot.reply_to(message, "🚀 Рассылка началась...")
+    
+    for user_id in users:
         try:
-            bot.send_message(uid, text)
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✨ Открыть бота", url="https://t.me/viddownload2026_bot"))
+            bot.send_message(user_id, text, reply_markup=markup)
             success += 1
         except:
-            blocked += 1
+            failed += 1
             
-    bot.reply_to(message, f"📢 Рассылка завершена!\n✅ Доставлено: {success}\n❌ Не смогли получить: {blocked}")
+    bot.edit_message_text(
+        f"✅ **Рассылка завершена!**\n\n"
+        f"📤 Успешно доставлено: {success}\n"
+        f"❌ Ошибок (заблокировали): {failed}",
+        message.chat.id,
+        status_msg.message_id,
+        parse_mode="Markdown"
+    )
 
-@bot.message_handler(commands=['stop'])
-def stop_bot(message):
-    if message.chat.id == ADMIN_ID:
-        bot.reply_to(message, "🛑 Остановка сервера бота...")
-        os._exit(0)
-
-# --- Скачивание видео ---
 @bot.message_handler(func=lambda message: True)
-def download_video(message):
-    if message.chat.id in load_data()["banned"]:
+def handle_text(message):
+    user_id = message.from_user.id
+    if is_banned(user_id):
         return
         
-    url = message.text.strip()
-    if not url.startswith("http"):
+    text = message.text.strip()
+    if text.startswith("http://") or text.startswith("https://"):
+        user_links[user_id] = text
+        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("📥 Видео (HD)", callback_data="dl_video"),
+            types.InlineKeyboardButton("🎵 Аудио (MP3)", callback_data="dl_audio")
+        )
+        
+        bot.reply_to(
+            message,
+            "🔗 Ссылка принята! Выбери формат для скачивания:",
+            reply_markup=markup
+        )
+    else:
+        bot.reply_to(message, "⚠️ Пожалуйста, отправь корректную ссылку на видео.")
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    user_id = call.from_user.id
+    if is_banned(user_id):
         return
+        
+    if user_id not in user_links:
+        bot.answer_callback_query(call.id, "⚠️ Ссылка устарела. Отправь её заново.")
+        return
+        
+    url = user_links[user_id]
+    is_audio = call.data == "dl_audio"
     
-    msg = bot.reply_to(message, "⏳ Скачиваю видео...")
+    bot.edit_message_text(
+        "⏳ **Скачиваем файл с сервера... Пожалуйста, подожди.**",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="Markdown"
+    )
     
+    filename = f"media_{user_id}"
+    ydl_opts = {
+        'outtmpl': filename + '.%(ext)s',
+        'format': 'bestaudio/best' if is_audio else 'best',
+    }
+    
+    if is_audio:
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
+
     try:
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': 'video.mp4',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            real_filename = ydl.prepare_filename(info)
+            if is_audio:
+                real_filename = os.path.splitext(real_filename)[0] + '.mp3'
+            else:
+                real_filename = os.path.splitext(real_filename)[0] + '.mp4'
             
-        if os.path.exists('video.mp4'):
-            with open('video.mp4', 'rb') as video:
-                bot.send_video(message.chat.id, video, caption="Готово! 🎥")
-            os.remove('video.mp4')
-        else:
-            bot.edit_message_text("❌ Не удалось найти файл видео.", message.chat.id, msg.message_id)
-            
-        bot.delete_message(message.chat.id, msg.message_id)
+        bot.edit_message_text(
+            "📤 **Отправляю файл в чат...**",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown"
+        )
+        
+        with open(real_filename, 'rb') as f:
+            if is_audio:
+                bot.send_audio(call.message.chat.id, f, caption="🎧 Твое аудио готово!")
+            else:
+                bot.send_video(call.message.chat.id, f, caption="🎬 Твое видео готово!")
+                
+        bot.delete_message(call.message.chat.id, call.message.message_id)
         
     except Exception as e:
-        error_text = str(e)
-        if len(error_text) > 100:
-            error_text = error_text[:100] + "..."
-        try:
-            bot.edit_message_text(f"❌ Ошибка: {error_text}", message.chat.id, msg.message_id)
-        except:
-            bot.send_message(message.chat.id, "❌ Ошибка скачивания.")
-            
-        if os.path.exists('video.mp4'):
-            os.remove('video.mp4')
+        bot.edit_message_text(
+            f"❌ **Ошибка при скачивании:**\n`{str(e)}`",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown"
+        )
+    finally:
+        # Автоочистка всех временных файлов пользователя
+        for ext in ['.mp4', '.mp3', '.webm', '.m4a', '.part']:
+            f_path = f"media_{user_id}{ext}"
+            if os.path.exists(f_path):
+                os.remove(f_path)
 
-if __name__ == "__main__":
-    t = threading.Thread(target=run_web)
+if __name__ == '__main__':
+    t = threading.Thread(target=run_flask)
+    t.daemon = True
     t.start()
-    
     print("Бот запущен!")
-    bot.polling(none_stop=True, interval=1)
+    bot.infinity_polling()
+
