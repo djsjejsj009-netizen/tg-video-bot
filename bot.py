@@ -7,7 +7,7 @@ import yt_dlp
 from flask import Flask
 
 # Настройки бота и администратора
-TOKEN = "8853016629:AAHZ2sXg5jHuynIcbskyMHFB9q6LNiAX41g"
+TOKEN = "ТВОЙ_ТОКЕН_БОТА"
 ADMIN_ID = 7796991089
 
 bot = telebot.TeleBot(TOKEN)
@@ -57,7 +57,18 @@ def cmd_start(message):
         bot.reply_to(message, "🚫 Вы заблокированы в этом боте.")
         return
     
-    add_user(user_id)
+    # Проверка на нового пользователя для уведомления админа
+    users = load_json(USERS_FILE)
+    if user_id not in users:
+        add_user(user_id)
+        # Уведомление администратору
+        username = message.from_user.username
+        name = message.from_user.first_name
+        mention = f"@{username}" if username else "без юзернейма"
+        try:
+            bot.send_message(ADMIN_ID, f"🆕 Новый пользователь!\n👤 Имя: {name}\n🔗 Юзернейм: {mention}\n🆔 ID: {user_id}")
+        except:
+            pass # Если бот не может написать админу, просто пропускаем
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("📢 Наш канал", url="https://t.me/lolurent"))
@@ -254,4 +265,4 @@ if __name__ == '__main__':
     t.start()
     print("Бот запущен!")
     bot.infinity_polling()
-
+        
