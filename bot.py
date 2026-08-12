@@ -60,7 +60,7 @@ def cmd_start(message):
     add_user(user_id)
     
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📢 Наш канал", url="https://t.me/tвой_канал"))
+    markup.add(types.InlineKeyboardButton("📢 Наш канал", url="https://t.me/lolurent"))
     
     bot.send_message(
         message.chat.id,
