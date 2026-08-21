@@ -3,133 +3,268 @@ import json
 import threading
 import telebot
 from telebot import types
-import yt_dlp
 from flask import Flask
 
-# Настройки бота и администратора
+# ==================== НАСТРОЙКИ ====================
 TOKEN = "8853016629:AAHZ2sXg5jHuynIcbskyMHFB9q6LNiAX41g"
 ADMIN_ID = 7796991089
+CHANNEL_RULES = "https://t.me/lolurent"  # Ссылка на канал с мануалами/правилами
+SUPPORT_USERNAME = "@admin_support"      # Ссылка на саппорт / админа для связи
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is running 24/7!"
+    return "Work Bot is running 24/7!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-# Базы данных в JSON
-USERS_FILE = 'users.json'
-BANNED_FILE = 'banned.json'
+# ==================== БАЗЫ ДАННЫХ (JSON) ====================
+USERS_FILE = 'workers.json'       # Все воркеры {user_id: {name, username, balance, total_profit, wallet, status}}
+PROFITS_FILE = 'profits.json'     # История профитов
+WITHDRAW_FILE = 'withdraws.json'  # Заявки на вывод
 
-def load_json(filename):
+def load_data(filename):
     if os.path.exists(filename):
         with open(filename, 'r', encoding='utf-8') as f:
             try:
                 return json.load(f)
             except:
-                return []
-    return []
+                return {} if filename == USERS_FILE else []
+    return {} if filename == USERS_FILE else []
 
-def save_json(filename, data):
+def save_data(filename, data):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def add_user(user_id):
-    users = load_json(USERS_FILE)
-    if user_id not in users:
-        users.append(user_id)
-        save_json(USERS_FILE, users)
+# ==================== КЛАВИАТУРЫ ====================
+def main_menu_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("💼 Мой профиль", "📊 Статистика команды")
+    markup.row("📖 Мануалы", "⚙️ Настроить кошелек")
+    markup.row("💸 Запросить выплату", "💬 Поддержка")
+    return markup
 
-def is_banned(user_id):
-    banned = load_json(BANNED_FILE)
-    return user_id in banned
-
-# Временное хранение ссылок пользователей
-user_links = {}
-
+# ==================== ОБРАБОТЧИК /START ====================
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
-    user_id = message.from_user.id
-    if is_banned(user_id):
-        bot.reply_to(message, "🚫 Вы заблокированы в этом боте.")
-        return
+    user_id = str(message.from_user.id)
+    users = load_data(USERS_FILE)
     
-    # Проверка на нового пользователя для уведомления админа
-    users = load_json(USERS_FILE)
+    # Регистрация воркера
     if user_id not in users:
-        add_user(user_id)
-        # Уведомление администратору
-        username = message.from_user.username
-        name = message.from_user.first_name
-        mention = f"@{username}" if username else "без юзернейма"
+        users[user_id] = {
+            "name": message.from_user.first_name,
+            "username": message.from_user.username or "нет",
+            "balance": 0.0,
+            "total_profit": 0.0,
+            "wallet": "Не указан",
+            "banned": False
+        }
+        save_data(USERS_FILE, users)
+        
+        # Уведомление админу о новом воркере
         try:
-            bot.send_message(ADMIN_ID, f"🆕 Новый пользователь!\n👤 Имя: {name}\n🔗 Юзернейм: {mention}\n🆔 ID: {user_id}")
+            bot.send_message(
+                ADMIN_ID,
+                f"🆕 **Новый воркер в команде!**\n\n"
+                f"👤 Имя: {message.from_user.first_name}\n"
+                f"🔗 Юзернейм: @{message.from_user.username or 'отсутствует'}\n"
+                f"🆔 ID: `{user_id}`",
+                parse_mode="Markdown"
+            )
         except:
-            pass # Если бот не может написать админу, просто пропускаем
-    
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📢 Наш канал", url="https://t.me/lolurent"))
-    
+            pass
+
+    if users[user_id].get("banned", False):
+        bot.reply_to(message, "🚫 Вы заблокированы в этой системе.")
+        return
+
     bot.send_message(
         message.chat.id,
-        "👋 Привет! Я твой супер-бот для скачивания медиа.\n\n"
-        "📥 Отправь мне ссылку на видео (TikTok, YouTube, Instagram и др.), "
-        "и я предложу выбрать формат (Видео HD или аудио MP3)!",
-        reply_markup=markup
-    )
-
-@bot.message_handler(commands=['stats'])
-def cmd_stats(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    users = load_json(USERS_FILE)
-    banned = load_json(BANNED_FILE)
-    bot.reply_to(
-        message,
-        f"📊 **Статистика бота:**\n\n"
-        f"👥 Всего пользователей: {len(users)}\n"
-        f"🚫 Заблокировано: {len(banned)}",
+        f"👋 Добро пожаловать в ворк-панель, **{message.from_user.first_name}**!\n\n"
+        "Используй меню ниже для работы, проверки баланса и вывода средств.",
+        reply_markup=main_menu_markup(),
         parse_mode="Markdown"
     )
 
-@bot.message_handler(commands=['ban'])
-def cmd_ban(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    args = message.text.split()
-    if len(args) < 2:
-        bot.reply_to(message, "⚠️ Укажи ID. Пример: `/ban 123456789`", parse_mode="Markdown")
-        return
-    try:
-        target_id = int(args[1])
-        banned = load_json(BANNED_FILE)
-        if target_id not in banned:
-            banned.append(target_id)
-            save_json(BANNED_FILE, banned)
-        bot.reply_to(message, f"✅ Пользователь `{target_id}` заблокирован.", parse_mode="Markdown")
-    except ValueError:
-        bot.reply_to(message, "❌ Неверный ID.")
+# ==================== ПРОФИЛЬ И КОШЕЛЕК ====================
+@bot.message_handler(func=lambda m: m.text == "💼 Мой профиль")
+def profile_handler(message):
+    user_id = str(message.from_user.id)
+    users = load_data(USERS_FILE)
+    if user_id not in users:
+        return cmd_start(message)
+    
+    u = users[user_id]
+    text = (
+        f"👤 **Твой профиль воркера:**\n\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"💰 Баланс: **{u['balance']} $**\n"
+        f"🏆 Всего заработано: **{u['total_profit']} $**\n"
+        f"💳 Кошелек/Реквизиты: `{u['wallet']}`\n"
+        f"📊 Статус: {'🔴 Заблокирован' if u['banned'] else '🟢 Активен'}"
+    )
+    bot.reply_to(message, text, parse_mode="Markdown")
 
-@bot.message_handler(commands=['unban'])
-def cmd_unban(message):
+@bot.message_handler(func=lambda m: m.text == "⚙️ Настроить кошелек")
+def set_wallet_start(message):
+    msg = bot.reply_to(message, "✍️ Отправь в ответном сообщении свои реквизиты (USDT TRC20, USDT TON, банковская карта и т.д.):")
+    bot.register_next_step_handler(msg, save_wallet_process)
+
+def save_wallet_process(message):
+    user_id = str(message.from_user.id)
+    wallet_text = message.text.strip()
+    users = load_data(USERS_FILE)
+    
+    if user_id in users:
+        users[user_id]["wallet"] = wallet_text
+        save_data(USERS_FILE, users)
+        bot.reply_to(message, f"✅ Кошелек успешно сохранен:\n`{wallet_text}`", parse_mode="Markdown", reply_markup=main_menu_markup())
+
+# ==================== МАНУАЛЫ И ПОДДЕРЖКА ====================
+@bot.message_handler(func=lambda m: m.text == "📖 Мануалы")
+def manuals_handler(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📚 Открыть канал с мануалами", url=CHANNEL_RULES))
+    bot.reply_to(message, "📖 Все актуальные мануалы, схемы и гайды находятся в нашем канале:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "💬 Поддержка")
+def support_handler(message):
+    bot.reply_to(message, f"💬 По всем вопросам, за помощью или по поводу залетевших профитов пишите саппорту: {SUPPORT_USERNAME}")
+
+@bot.message_handler(func=lambda m: m.text == "📊 Статистика команды")
+def team_stats(message):
+    users = load_data(USERS_FILE)
+    profits = load_data(PROFITS_FILE)
+    
+    total_workers = len(users)
+    all_time_money = sum(p.get('amount', 0) for p in profits)
+    
+    bot.reply_to(
+        message,
+        f"📊 **Общая статистика команды:**\n\n"
+        f"👥 Всего воркеров: {total_workers}\n"
+        f"💰 Суммарный профит команды: **{all_time_money} $**\n"
+        f"🎯 Успешных профитов: {len(profits)}",
+        parse_mode="Markdown"
+    )
+
+# ==================== ВЫПЛАТЫ ====================
+@bot.message_handler(func=lambda m: m.text == "💸 Запросить выплату")
+def request_withdraw(message):
+    user_id = str(message.from_user.id)
+    users = load_data(USERS_FILE)
+    
+    if user_id not in users:
+        return
+    
+    balance = users[user_id]["balance"]
+    wallet = users[user_id]["wallet"]
+    
+    if balance <= 0:
+        bot.reply_to(message, "⚠️ У тебя нулевой баланс для вывода.")
+        return
+        
+    if wallet == "Не указан":
+        bot.reply_to(message, "⚠️ Сначала укажи свой кошелек через кнопку «⚙️ Настроить кошелек»!")
+        return
+        
+    # Отправка заявки админу
+    withdraws = load_data(WITHDRAW_FILE)
+    req_id = str(len(withdraws) + 1)
+    
+    withdraw_data = {
+        "req_id": req_id,
+        "user_id": user_id,
+        "amount": balance,
+        "wallet": wallet
+    }
+    withdraws.append(withdraw_data)
+    save_data(WITHDRAW_FILE, withdraws)
+    
+    # Сбрасываем баланс воркера до подтверждения (или замораживаем)
+    users[user_id]["balance"] = 0.0
+    save_data(USERS_FILE, users)
+    
+    # Кнопки для админа
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Выплачено", callback_data=f"wd_yes_{req_id}"),
+        types.InlineKeyboardButton("❌ Отклонить", callback_data=f"wd_no_{req_id}")
+    )
+    
+    try:
+        bot.send_message(
+            ADMIN_ID,
+            f"💸 **Новая заявка на вывод!**\n\n"
+            f"👤 Воркер: ID `{user_id}` (@{users[user_id]['username']})\n"
+            f"💵 Сумма: **{balance} $**\n"
+            f"💳 Реквизиты: `{wallet}`",
+            reply_markup=markup,
+            parse_mode="Markdown"
+        )
+    except:
+        pass
+        
+    bot.reply_to(message, f"✅ Заявка на вывод **{balance} $** успешно отправлена администратору!", parse_mode="Markdown")
+
+# ==================== АДМИН-ПАНЕЛЬ / КОМАНДЫ АДМИНА ====================
+@bot.message_handler(commands=['admin'])
+def cmd_admin(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    help_text = (
+        "👑 **Админ-панель команды:**\n\n"
+        "• `/addprofit [ID] [Сумма]` — Зачислить профит воркеру\n"
+        "• `/balance [ID] [Сумма]` — Изменить баланс вручную\n"
+        "• `/ban [ID]` — Заблокировать воркера\n"
+        "• `/unban [ID]` — Разблокировать воркера\n"
+        "• `/broadcast [Текст]` — Рассылка всем воркерам\n"
+        "• `/users` — Список всех воркеров"
+    )
+    bot.reply_to(message, help_text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['addprofit'])
+def cmd_addprofit(message):
     if message.from_user.id != ADMIN_ID:
         return
     args = message.text.split()
-    if len(args) < 2:
-        bot.reply_to(message, "⚠️ Укажи ID. Пример: `/unban 123456789`", parse_mode="Markdown")
+    if len(args) < 3:
+        bot.reply_to(message, "⚠️ Формат: `/addprofit ID СУММА`", parse_mode="Markdown")
         return
+    
+    target_id = args[1]
     try:
-        target_id = int(args[1])
-        banned = load_json(BANNED_FILE)
-        if target_id in banned:
-            banned.remove(target_id)
-            save_json(BANNED_FILE, banned)
-        bot.reply_to(message, f"✅ Пользователь `{target_id}` разблокирован.", parse_mode="Markdown")
+        amount = float(args[2])
     except ValueError:
-        bot.reply_to(message, "❌ Неверный ID.")
+        bot.reply_to(message, "❌ Неверная сумма.")
+        return
+        
+    users = load_data(USERS_FILE)
+    if target_id not in users:
+        bot.reply_to(message, "❌ Воркер с таким ID не найден в базе.")
+        return
+        
+    users[target_id]["balance"] += amount
+    users[target_id]["total_profit"] += amount
+    save_data(USERS_FILE, users)
+    
+    # Сохраняем в общую историю профитов
+    profits = load_data(PROFITS_FILE)
+    profits.append({"user_id": target_id, "amount": amount})
+    save_data(PROFITS_FILE, profits)
+    
+    bot.reply_to(message, f"✅ Успешно зачислено `{amount}$` воркеру `{target_id}`!", parse_mode="Markdown")
+    
+    # Уведомление воркеру
+    try:
+        bot.send_message(target_id, f"🎉 **У тебя новый профит!**\n\n💰 Сумма: **{amount} $** зачислена на баланс!", parse_mode="Markdown")
+    except:
+        pass
 
 @bot.message_handler(commands=['broadcast'])
 def cmd_broadcast(message):
@@ -137,132 +272,99 @@ def cmd_broadcast(message):
         return
     text = message.text.replace('/broadcast', '').strip()
     if not text:
-        bot.reply_to(message, "⚠️ Напиши текст для рассылки после команды.")
+        bot.reply_to(message, "⚠️ Напиши текст для рассылки.")
         return
     
-    users = load_json(USERS_FILE)
+    users = load_data(USERS_FILE)
     success = 0
-    failed = 0
-    
-    status_msg = bot.reply_to(message, "🚀 Рассылка началась...")
-    
-    for user_id in users:
+    for uid in users:
         try:
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("✨ Открыть бота", url="https://t.me/viddownload2026_bot"))
-            bot.send_message(user_id, text, reply_markup=markup)
+            bot.send_message(int(uid), f"📢 **Рассылка от команды:**\n\n{text}", parse_mode="Markdown")
             success += 1
         except:
-            failed += 1
-            
-    bot.edit_message_text(
-        f"✅ **Рассылка завершена!**\n\n"
-        f"📤 Успешно доставлено: {success}\n"
-        f"❌ Ошибок (заблокировали): {failed}",
-        message.chat.id,
-        status_msg.message_id,
-        parse_mode="Markdown"
-    )
+            pass
+    bot.reply_to(message, f"✅ Рассылка завершена. Доставлено: {success}/{len(users)}")
 
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    user_id = message.from_user.id
-    if is_banned(user_id):
+@bot.message_handler(commands=['ban'])
+def cmd_ban(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) < 2: return
+    uid = args[1]
+    users = load_data(USERS_FILE)
+    if uid in users:
+        users[uid]["banned"] = True
+        save_data(USERS_FILE, users)
+        bot.reply_to(message, f"✅ Воркер `{uid}` заблокирован.", parse_mode="Markdown")
+
+@bot.message_handler(commands=['unban'])
+def cmd_unban(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    args = message.text.split()
+    if len(args) < 2: return
+    uid = args[1]
+    users = load_data(USERS_FILE)
+    if uid in users:
+        users[uid]["banned"] = False
+        save_data(USERS_FILE, users)
+        bot.reply_to(message, f"✅ Воркер `{uid}` разблокирован.", parse_mode="Markdown")
+
+# Обработка инлайн-кнопок вывода админом
+@bot.callback_query_handler(func=lambda call: call.data.startswith('wd_'))
+def withdraw_callback(call):
+    if call.from_user.id != ADMIN_ID:
         return
         
-    text = message.text.strip()
-    if text.startswith("http://") or text.startswith("https://"):
-        user_links[user_id] = text
+    action, _, req_id = call.data.split('_')
+    withdraws = load_data(WITHDRAW_FILE)
+    
+    req = next((w for w in withdraws if w["req_id"] == req_id), None)
+    if not req:
+        bot.answer_callback_query(call.id, "⚠️ Заявка не найдена или уже обработана.")
+        return
         
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        markup.add(
-            types.InlineKeyboardButton("📥 Видео (HD)", callback_data="dl_video"),
-            types.InlineKeyboardButton("🎵 Аудио (MP3)", callback_data="dl_audio")
+    target_id = req["user_id"]
+    amount = req["amount"]
+    
+    if action == "yes":
+        bot.edit_message_text(
+            f"✅ **Заявка #{req_id} одобрена и выплачена!**\nСумма: {amount}$",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode="Markdown"
         )
-        
-        bot.reply_to(
-            message,
-            "🔗 Ссылка принята! Выбери формат для скачивания:",
-            reply_markup=markup
-        )
+        try:
+            bot.send_message(target_id, f"✅ Ваша заявка на вывод **{amount} $** успешно выплачена! Проверьте реквизиты.", parse_mode="Markdown")
+        except:
+            pass
     else:
-        bot.reply_to(message, "⚠️ Пожалуйста, отправь корректную ссылку на видео.")
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    user_id = call.from_user.id
-    if is_banned(user_id):
-        return
-        
-    if user_id not in user_links:
-        bot.answer_callback_query(call.id, "⚠️ Ссылка устарела. Отправь её заново.")
-        return
-        
-    url = user_links[user_id]
-    is_audio = call.data == "dl_audio"
-    
-    bot.edit_message_text(
-        "⏳ **Скачиваем файл с сервера... Пожалуйста, подожди.**",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode="Markdown"
-    )
-    
-    filename = f"media_{user_id}"
-    ydl_opts = {
-        'outtmpl': filename + '.%(ext)s',
-        'format': 'bestaudio/best' if is_audio else 'best',
-    }
-    
-    if is_audio:
-        ydl_opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            real_filename = ydl.prepare_filename(info)
-            if is_audio:
-                real_filename = os.path.splitext(real_filename)[0] + '.mp3'
-            else:
-                real_filename = os.path.splitext(real_filename)[0] + '.mp4'
+        # Возвращаем баланс обратно воркеру при отказе
+        users = load_data(USERS_FILE)
+        if target_id in users:
+            users[target_id]["balance"] += amount
+            save_data(USERS_FILE, users)
             
         bot.edit_message_text(
-            "📤 **Отправляю файл в чат...**",
+            f"❌ **Заявка #{req_id} отклонена.** Средства возвращены на баланс воркера.",
             call.message.chat.id,
             call.message.message_id,
             parse_mode="Markdown"
         )
-        
-        with open(real_filename, 'rb') as f:
-            if is_audio:
-                bot.send_audio(call.message.chat.id, f, caption="🎧 Твое аудио готово!")
-            else:
-                bot.send_video(call.message.chat.id, f, caption="🎬 Твое видео готово!")
-                
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        
-    except Exception as e:
-        bot.edit_message_text(
-            f"❌ **Ошибка при скачивании:**\n`{str(e)}`",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode="Markdown"
-        )
-    finally:
-        # Автоочистка всех временных файлов пользователя
-        for ext in ['.mp4', '.mp3', '.webm', '.m4a', '.part']:
-            f_path = f"media_{user_id}{ext}"
-            if os.path.exists(f_path):
-                os.remove(f_path)
+        try:
+            bot.send_message(target_id, f"❌ Ваша заявка на вывод **{amount} $** была отклонена администратором. Средства возвращены на баланс.", parse_mode="Markdown")
+        except:
+            pass
+            
+    # Удаляем из активных заявок
+    withdraws = [w for w in withdraws if w["req_id"] != req_id]
+    save_data(WITHDRAW_FILE, withdraws)
 
+# ==================== ЗАПУСК БОТА ====================
 if __name__ == '__main__':
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
-    print("Бот запущен!")
+    print("Ворк-бот успешно запущен!")
     bot.infinity_polling()
-        
