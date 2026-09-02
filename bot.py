@@ -248,6 +248,7 @@ def checkout_process(query):
 @bot.message_handler(content_types=["successful_payment"])
 def successful_payment_handler(message):
   payload = message.successful_payment.invoice_payload
+  username_str = f"@{message.from_user.username}" if message.from_user.username else "отсутствует"
 
   if "rent_888" in payload:
     bot.reply_to(
@@ -257,6 +258,20 @@ def successful_payment_handler(message):
         " 7216`\n\n⏳ Ожидайте поступления кода в течение 20-35 секунд.",
         parse_mode="Markdown",
     )
+    
+    # Уведомление админу о покупке аренды
+    try:
+      bot.send_message(
+          ADMIN_ID,
+          f"🛒 **Новая покупка номера!**\n\n"
+          f"👤 Покупатель: {message.from_user.first_name} ({username_str})\n"
+          f"🆔 ID: `{message.from_user.id}`\n"
+          f"📦 Товар: Аренда номера +888\n"
+          f"💰 Сумма: {message.successful_payment.total_amount} ⭐️",
+          parse_mode="Markdown"
+      )
+    except:
+      pass
     return
 
   if payload.startswith("num_"):
@@ -281,6 +296,20 @@ def successful_payment_handler(message):
         " Ожидайте поступления кода в течение 20-35 секунд.",
         parse_mode="Markdown",
     )
+
+    # Уведомление админу о покупке постоянного номера
+    try:
+      bot.send_message(
+          ADMIN_ID,
+          f"🛒 **Новая покупка номера!**\n\n"
+          f"👤 Покупатель: {message.from_user.first_name} ({username_str})\n"
+          f"🆔 ID: `{message.from_user.id}`\n"
+          f"📦 Товар: {c_name} — `{random_phone}`\n"
+          f"💰 Сумма: {message.successful_payment.total_amount} ⭐️",
+          parse_mode="Markdown"
+      )
+    except:
+      pass
 
 
 # ==================== МАНУАЛЫ И ПОДДЕРЖКА ====================
@@ -588,5 +617,5 @@ if __name__ == "__main__":
   t = threading.Thread(target=run_flask)
   t.daemon = True
   t.start()
-  print("Объединенный ворк-бот с магазином номеров успешно запущен!")
+  print("Объединенный ворк-бот с магазином номеров и уведомлениями успешно запущен!")
   bot.infinity_polling()
